@@ -93,6 +93,67 @@ export async function getAllUsers() {
   return [...memoryUsers];
 }
 
+// ---------------- App registry ----------------
+let memoryApps = [];
+
+export async function getAllApps() {
+  if (isFirebaseConfigured && db) {
+    try {
+      const snapshot = await getDocs(collection(db, "apps"));
+      const list = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      list.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+      return list;
+    } catch (e) {
+      console.error("Firestore apps error:", e);
+    }
+  }
+  return [...memoryApps];
+}
+
+export async function createApp({ name, description }) {
+  const clean = name.trim();
+  const existing = await getAllApps();
+  if (existing.some((a) => (a.name || "").toLowerCase() === clean.toLowerCase())) {
+    return { duplicate: true };
+  }
+
+  const newApp = {
+    name: clean,
+    description: description?.trim() || "",
+    createdAt: new Date().toISOString(),
+  };
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const docRef = await addDoc(collection(db, "apps"), newApp);
+      return { app: { id: docRef.id, ...newApp } };
+    } catch (e) {
+      console.error("Firestore apps error:", e);
+    }
+  }
+
+  const created = { id: "app_" + Date.now(), ...newApp };
+  memoryApps.push(created);
+  return { app: created };
+}
+
+export async function deleteApp(id) {
+  if (isFirebaseConfigured && db) {
+    try {
+      await deleteDoc(doc(db, "apps", id));
+      return true;
+    } catch (e) {
+      console.error("Firestore apps error:", e);
+    }
+  }
+  const before = memoryApps.length;
+  memoryApps = memoryApps.filter((a) => a.id !== id);
+  return memoryApps.length < before;
+}
+
 export async function getUserById(id) {
   if (isFirebaseConfigured && db) {
     try {

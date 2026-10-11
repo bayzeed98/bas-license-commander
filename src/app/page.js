@@ -55,6 +55,10 @@ export default function Home() {
   const [allowMultiDevice, setAllowMultiDevice] = useState(false);
   const [newAppName, setNewAppName] = useState("");
   const [appFilter, setAppFilter] = useState("ALL");
+  const [apps, setApps] = useState([]);
+  const [newAppFormName, setNewAppFormName] = useState("");
+  const [newAppDesc, setNewAppDesc] = useState("");
+  const [isAddingApp, setIsAddingApp] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
 
@@ -75,6 +79,7 @@ export default function Home() {
         setIsAuthenticated(true);
         fetchLicenses(token);
         fetchLogs(token);
+        fetchApps(token);
       } else {
         setIsLoading(false);
       }
@@ -100,6 +105,7 @@ export default function Home() {
         setIsAuthenticated(true);
         fetchLicenses(data.token);
         fetchLogs(data.token);
+        fetchApps(data.token);
         showToast("Authenticated as Administrator");
       } else {
         setAuthError(data.message || "Invalid administrator password");
@@ -154,6 +160,75 @@ export default function Home() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const fetchApps = async (tokenOverride) => {
+    const token = tokenOverride || localStorage.getItem("bas_admin_token");
+    if (!token) return;
+    try {
+      const res = await fetch("/api/admin/apps", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.apps) setApps(data.apps);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddApp = async (e) => {
+    e.preventDefault();
+    if (!newAppFormName.trim()) return;
+    setIsAddingApp(true);
+    const token = localStorage.getItem("bas_admin_token");
+    try {
+      const res = await fetch("/api/admin/apps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name: newAppFormName, description: newAppDesc }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`App "${newAppFormName.trim()}" added!`);
+        setNewAppFormName("");
+        setNewAppDesc("");
+        fetchApps();
+      } else {
+        showToast(data.message || "Failed to add app", "error");
+      }
+    } catch (err) {
+      showToast("Network error", "error");
+    } finally {
+      setIsAddingApp(false);
+    }
+  };
+
+  const handleDeleteApp = async (app) => {
+    const used = licenses.filter((l) => l.appName === app.name).length;
+    const warn = used > 0 ? ` ${used} license(s) still use this app name (they will NOT be deleted).` : "";
+    if (!confirm(`Delete app "${app.name}"?${warn}`)) return;
+    const token = localStorage.getItem("bas_admin_token");
+    try {
+      const res = await fetch(`/api/admin/apps?id=${app.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        showToast(`App deleted: ${app.name}`);
+        if (appFilter === app.name) setAppFilter("ALL");
+        fetchApps();
+      } else {
+        showToast("Failed to delete app", "error");
+      }
+    } catch (err) {
+      showToast("Network error", "error");
+    }
+  };
+
+  const openLicenseModalForApp = (appName) => {
+    setNewAppName(appName || "");
+    setModalError("");
+    setIsModalOpen(true);
   };
 
   const togglePasswordVisibility = (id) => {
@@ -323,14 +398,17 @@ export default function Home() {
     }
   };
 
-  // Distinct app names across all licenses
+  // Distinct app names: registered apps + any name already used by a license
   const appList = useMemo(() => {
     const set = new Set();
+    apps.forEach((a) => {
+      if (a.name && a.name.trim()) set.add(a.name.trim());
+    });
     licenses.forEach((l) => {
       if (l.appName && l.appName.trim()) set.add(l.appName.trim());
     });
     return Array.from(set).sort();
-  }, [licenses]);
+  }, [apps, licenses]);
 
   // App name used in the generated BAS snippet
   const snippetApp = appFilter !== "ALL" ? appFilter : appList[0] || "MyApp";
@@ -366,7 +444,7 @@ export default function Home() {
   }, [licenses]);
 
   // BAS Code Snippet
-  const basSnippet = useMemo(() => {
+  const buildSnippet = (appForSnippet) => {
     const targetUrl = hostUrl ? `${hostUrl}/api/verify` : "https://YOUR-APP.vercel.app/api/verify";
     return `// ==========================================
 // BAS CYBER-AUTH LICENSE VERIFICATION CODE
@@ -376,7 +454,7 @@ var username = {{LicenseUser}};
 var password = {{LicensePass}};
 
 // App name (must match the 'App Name' you entered when creating the license):
-var appName = "${snippetApp}";
+var appName = "${appForSnippet}";
 
 // 2. Extract unique PC Hardware ID (HWID):
 var hwid = native("sysinfo", "baseboard_serial_number", "") + "_" + native("sysinfo", "cpu_name", "");
@@ -396,7 +474,9 @@ if (result.status !== "success") {
 
 log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days left: " + result.daysRemaining + ")");
 `;
-  }, [hostUrl, snippetApp]);
+  };
+
+  const basSnippet = useMemo(() => buildSnippet(snippetApp), [hostUrl, snippetApp]);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -839,6 +919,15 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
           </button>
 
           <button
+            onClick={() => setActiveTab("apps")}
+            className={`btn-neon ${activeTab === "apps" ? "btn-primary" : "btn-secondary"}`}
+            style={{ padding: "8px 20px", fontSize: "0.9rem" }}
+          >
+            <Zap size={16} />
+            <span>My Apps ({appList.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab("logs")}
             className={`btn-neon ${activeTab === "logs" ? "btn-primary" : "btn-secondary"}`}
             style={{ padding: "8px 20px", fontSize: "0.9rem" }}
@@ -856,6 +945,120 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
             <span>BAS Integration Guide</span>
           </button>
         </div>
+
+        {/* ========================================================= */}
+        {/* TAB: MY APPS */}
+        {/* ========================================================= */}
+        {activeTab === "apps" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            <div className="glass-card" style={{ padding: "24px" }}>
+              <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "6px" }}>Add a New App</h3>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "16px" }}>
+                Every time you build a new BAS app, register it here first. Then you can give licenses of that app to your users.
+              </p>
+              <form onSubmit={handleAddApp} style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <input
+                  type="text"
+                  className="input-glass"
+                  placeholder="App name (e.g. InstaBot)"
+                  value={newAppFormName}
+                  onChange={(e) => setNewAppFormName(e.target.value)}
+                  required
+                  style={{ flex: 1, minWidth: "220px" }}
+                />
+                <input
+                  type="text"
+                  className="input-glass"
+                  placeholder="Short note (optional)"
+                  value={newAppDesc}
+                  onChange={(e) => setNewAppDesc(e.target.value)}
+                  style={{ flex: 2, minWidth: "220px" }}
+                />
+                <button type="submit" disabled={isAddingApp} className="btn-neon btn-primary" style={{ padding: "10px 22px" }}>
+                  <Plus size={16} />
+                  <span>{isAddingApp ? "ADDING..." : "ADD APP"}</span>
+                </button>
+              </form>
+            </div>
+
+            {appList.length === 0 ? (
+              <div className="glass-card" style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)" }}>
+                No apps yet. Add your first app above.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "20px" }}>
+                {appList.map((name) => {
+                  const reg = apps.find((a) => a.name === name);
+                  const appLicenses = licenses.filter((l) => l.appName === name);
+                  const activeCount = appLicenses.filter((l) => l.status === "Active").length;
+                  return (
+                    <div key={name} className="glass-card glass-card-interactive" style={{ padding: "22px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                        <div>
+                          <div style={{ fontSize: "1.15rem", fontWeight: 800 }}>📦 {name}</div>
+                          {reg?.description && (
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: "4px" }}>{reg.description}</div>
+                          )}
+                        </div>
+                        {reg && (
+                          <button
+                            onClick={() => handleDeleteApp(reg)}
+                            className="btn-neon btn-secondary btn-icon"
+                            title="Delete app"
+                            style={{ border: "1px solid rgba(239,68,68,0.3)" }}
+                          >
+                            <Trash2 size={14} color="#f87171" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", gap: "18px", margin: "18px 0" }}>
+                        <div>
+                          <div style={{ fontSize: "1.6rem", fontWeight: 800 }}>{appLicenses.length}</div>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text-dim)", textTransform: "uppercase" }}>Users</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--accent-emerald)" }}>{activeCount}</div>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text-dim)", textTransform: "uppercase" }}>Active</div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                        <button
+                          onClick={() => openLicenseModalForApp(name)}
+                          className="btn-neon btn-primary"
+                          style={{ padding: "7px 14px", fontSize: "0.78rem" }}
+                        >
+                          <Plus size={14} />
+                          <span>Give License</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setAppFilter(name);
+                            setActiveTab("licenses");
+                          }}
+                          className="btn-neon btn-secondary"
+                          style={{ padding: "7px 14px", fontSize: "0.78rem" }}
+                        >
+                          <Users size={14} />
+                          <span>View Users</span>
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(buildSnippet(name))}
+                          className="btn-neon btn-secondary"
+                          style={{ padding: "7px 14px", fontSize: "0.78rem" }}
+                        >
+                          <Terminal size={14} />
+                          <span>Copy BAS Code</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ========================================================= */}
         {/* TAB 1: LICENSES TABLE */}
@@ -1448,21 +1651,25 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                     textTransform: "uppercase",
                   }}
                 >
-                  App Name (Which software is this license for?)
+                  App (Which software is this license for?)
                 </label>
-                <input
-                  type="text"
+                <select
                   className="input-glass"
-                  list="appNameList"
-                  placeholder="e.g. InstaBot, YoutubeTool (leave blank = works for all apps)"
                   value={newAppName}
                   onChange={(e) => setNewAppName(e.target.value)}
-                />
-                <datalist id="appNameList">
+                >
+                  <option value="">🌐 All Apps (works for every app)</option>
                   {appList.map((a) => (
-                    <option key={a} value={a} />
+                    <option key={a} value={a}>
+                      📦 {a}
+                    </option>
                   ))}
-                </datalist>
+                </select>
+                {appList.length === 0 && (
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginTop: "6px" }}>
+                    No apps yet — add one from the "My Apps" tab first.
+                  </div>
+                )}
               </div>
 
               {/* Client Name */}
