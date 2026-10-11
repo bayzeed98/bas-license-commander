@@ -28,10 +28,10 @@ export async function GET(req) {
     return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
   }
 
-  const users = await getAllUsers();
+  const { users, error } = await getAllUsers();
   const today = new Date().toISOString().split("T")[0];
 
-  const enriched = users.map((u) => {
+  const enriched = (users || []).map((u) => {
     let statusText = "Active";
     if (!u.isActive) statusText = "Disabled";
     else if (u.expiresAt && today > u.expiresAt) statusText = "Expired";
@@ -44,7 +44,11 @@ export async function GET(req) {
     };
   });
 
-  return NextResponse.json({ status: "success", users: enriched });
+  return NextResponse.json({
+    status: "success",
+    users: enriched,
+    firebaseError: error || null,
+  });
 }
 
 // POST: Create a new license

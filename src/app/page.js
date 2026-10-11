@@ -45,6 +45,7 @@ export default function Home() {
   const [revealedPasswords, setRevealedPasswords] = useState({});
   const [copiedCode, setCopiedCode] = useState(false);
   const [hostUrl, setHostUrl] = useState("");
+  const [firebaseError, setFirebaseError] = useState(null);
 
   // Create License Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -135,6 +136,7 @@ export default function Home() {
       const data = await res.json();
       if (res.ok && data.users) {
         setLicenses(data.users);
+        setFirebaseError(data.firebaseError || null);
       } else if (res.status === 401) {
         handleLogout();
       }
@@ -766,6 +768,47 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
 
       {/* MAIN CONTAINER */}
       <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "32px 24px", width: "100%", flex: 1 }}>
+        {/* FIREBASE PERMISSION ERROR BANNER */}
+        {firebaseError && (
+          <div
+            style={{
+              background: "rgba(239, 68, 68, 0.15)",
+              border: "1px solid rgba(239, 68, 68, 0.5)",
+              borderRadius: "14px",
+              padding: "18px 24px",
+              marginBottom: "28px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "16px",
+              boxShadow: "0 10px 30px rgba(239, 68, 68, 0.2)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "14px" }}>
+              <AlertTriangle size={24} color="#f87171" style={{ flexShrink: 0, marginTop: "2px" }} />
+              <div>
+                <h4 style={{ fontSize: "1rem", fontWeight: 800, color: "#f87171", margin: 0 }}>
+                  Firebase Firestore Database Rules Required
+                </h4>
+                <p style={{ fontSize: "0.85rem", color: "#fca5a5", marginTop: "4px", marginBottom: "8px" }}>
+                  Your licenses/apps cannot be saved permanently because Firestore rejected access: <code>{firebaseError}</code>
+                </p>
+                <div style={{ fontSize: "0.82rem", color: "#e2e8f0", background: "rgba(0,0,0,0.3)", padding: "8px 12px", borderRadius: "8px" }}>
+                  👉 <b>How to fix in 10 seconds:</b> Open <b>Firebase Console</b> &rarr; <b>Firestore Database</b> &rarr; <b>Rules</b> tab &rarr; change to <code>allow read, write: if true;</code> &rarr; click <b>Publish</b>.
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => fetchLicenses()}
+              className="btn-neon btn-secondary"
+              style={{ padding: "8px 16px", fontSize: "0.82rem", whiteSpace: "nowrap" }}
+            >
+              <RefreshCw size={14} />
+              <span>Retry Connection</span>
+            </button>
+          </div>
+        )}
+
         {/* HERO 3D METRIC CARDS */}
         <div
           style={{

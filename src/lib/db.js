@@ -15,82 +15,26 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-// Local fallback store (used if Firebase credentials are not yet configured)
-let memoryUsers = [
-  {
-    id: "usr_demo1",
-    username: "client_vip",
-    password: "vip12345password",
-    clientName: "VIP Client (Demo)",
-    hwid: "", // Empty: will bind on first run
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 30 days
-    isActive: true,
-    allowMultiDevice: false,
-    createdAt: new Date().toISOString(),
-    lastUsedAt: null,
-  },
-  {
-    id: "usr_demo2",
-    username: "john_doe",
-    password: "secure_pass_99",
-    clientName: "John Doe",
-    hwid: "BASEBOARD1234-CORE-I7",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 7 days
-    isActive: true,
-    allowMultiDevice: false,
-    createdAt: new Date().toISOString(),
-    lastUsedAt: new Date().toISOString(),
-  },
-  {
-    id: "usr_demo3",
-    username: "expired_user",
-    password: "oldpassword",
-    clientName: "Trial Expired",
-    hwid: "OLD-HWID-5566",
-    expiresAt: "2024-01-01",
-    isActive: false,
-    allowMultiDevice: false,
-    createdAt: new Date().toISOString(),
-    lastUsedAt: "2024-01-01T12:00:00Z",
-  },
-];
-
-let memoryLogs = [
-  {
-    id: "log_1",
-    username: "client_vip",
-    hwid: "NEW-DEVICE-XYZ",
-    ip: "103.14.22.1",
-    status: "SUCCESS",
-    message: "License verified successfully",
-    timestamp: new Date().toISOString(),
-  },
-  {
-    id: "log_2",
-    username: "expired_user",
-    hwid: "OLD-HWID-5566",
-    ip: "182.16.10.4",
-    status: "BLOCKED",
-    message: "Subscription expired",
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-  },
-];
+// Local fallback store (used only if Firebase credentials are not yet configured)
+let memoryUsers = [];
+let memoryLogs = [];
 
 export async function getAllUsers() {
   if (isFirebaseConfigured && db) {
     try {
-      const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocs(collection(db, "users"));
       const list = [];
       snapshot.forEach((docSnap) => {
         list.push({ id: docSnap.id, ...docSnap.data() });
       });
-      return list;
+      list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      return { users: list, error: null };
     } catch (e) {
-      console.error("Firestore error, falling back to memory:", e);
+      console.error("Firestore getAllUsers error:", e);
+      return { users: [...memoryUsers], error: e.message || e.code };
     }
   }
-  return [...memoryUsers];
+  return { users: [...memoryUsers], error: null };
 }
 
 // ---------------- App registry ----------------
@@ -132,6 +76,7 @@ export async function createApp({ name, description }) {
       return { app: { id: docRef.id, ...newApp } };
     } catch (e) {
       console.error("Firestore apps error:", e);
+      throw new Error(`Firebase Permission/Connection Error: ${e.message}`);
     }
   }
 
@@ -147,6 +92,7 @@ export async function deleteApp(id) {
       return true;
     } catch (e) {
       console.error("Firestore apps error:", e);
+      throw new Error(`Firebase Permission/Connection Error: ${e.message}`);
     }
   }
   const before = memoryApps.length;
@@ -228,7 +174,8 @@ export async function createUser(userData) {
       const docRef = await addDoc(col, newUser);
       return { id: docRef.id, ...newUser };
     } catch (e) {
-      console.error("Firestore error:", e);
+      console.error("Firestore createUser error:", e);
+      throw new Error(`Firebase Permission/Connection Error: ${e.message}`);
     }
   }
 
@@ -245,7 +192,8 @@ export async function updateUser(id, updates) {
       await updateDoc(docRef, updates);
       return true;
     } catch (e) {
-      console.error("Firestore error:", e);
+      console.error("Firestore updateUser error:", e);
+      throw new Error(`Firebase Permission/Connection Error: ${e.message}`);
     }
   }
 
@@ -263,7 +211,8 @@ export async function deleteUser(id) {
       await deleteDoc(doc(db, "users", id));
       return true;
     } catch (e) {
-      console.error("Firestore error:", e);
+      console.error("Firestore deleteUser error:", e);
+      throw new Error(`Firebase Permission/Connection Error: ${e.message}`);
     }
   }
 
