@@ -53,6 +53,8 @@ export default function Home() {
   const [newClientName, setNewClientName] = useState("");
   const [newExpiry, setNewExpiry] = useState("");
   const [allowMultiDevice, setAllowMultiDevice] = useState(false);
+  const [newAppName, setNewAppName] = useState("");
+  const [appFilter, setAppFilter] = useState("ALL");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modalError, setModalError] = useState("");
 
@@ -294,6 +296,7 @@ export default function Home() {
           username: newUsername,
           password: newPassword,
           clientName: newClientName || newUsername,
+          appName: newAppName.trim(),
           expiresAt: newExpiry,
           allowMultiDevice,
         }),
@@ -308,6 +311,7 @@ export default function Home() {
         setNewClientName("");
         setNewExpiry("");
         setAllowMultiDevice(false);
+        setNewAppName("");
         fetchLicenses();
       } else {
         setModalError(data.message || "Failed to create license");
@@ -319,13 +323,29 @@ export default function Home() {
     }
   };
 
+  // Distinct app names across all licenses
+  const appList = useMemo(() => {
+    const set = new Set();
+    licenses.forEach((l) => {
+      if (l.appName && l.appName.trim()) set.add(l.appName.trim());
+    });
+    return Array.from(set).sort();
+  }, [licenses]);
+
+  // App name used in the generated BAS snippet
+  const snippetApp = appFilter !== "ALL" ? appFilter : appList[0] || "MyApp";
+
   // Filtered Licenses
   const filteredLicenses = useMemo(() => {
     return licenses.filter((item) => {
+      if (appFilter !== "ALL" && (item.appName || "") !== appFilter) return false;
+
+      const q = searchQuery.toLowerCase();
       const matchesSearch =
-        item.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.clientName && item.clientName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (item.hwid && item.hwid.toLowerCase().includes(searchQuery.toLowerCase()));
+        item.username.toLowerCase().includes(q) ||
+        (item.clientName && item.clientName.toLowerCase().includes(q)) ||
+        (item.appName && item.appName.toLowerCase().includes(q)) ||
+        (item.hwid && item.hwid.toLowerCase().includes(q));
 
       if (!matchesSearch) return false;
 
@@ -334,7 +354,7 @@ export default function Home() {
       if (statusFilter === "DISABLED") return item.status === "Disabled";
       return true;
     });
-  }, [licenses, searchQuery, statusFilter]);
+  }, [licenses, searchQuery, statusFilter, appFilter]);
 
   // Metrics
   const metrics = useMemo(() => {
@@ -355,12 +375,15 @@ export default function Home() {
 var username = {{LicenseUser}};
 var password = {{LicensePass}};
 
+// App name (must match the 'App Name' you entered when creating the license):
+var appName = "${snippetApp}";
+
 // 2. Extract unique PC Hardware ID (HWID):
 var hwid = native("sysinfo", "baseboard_serial_number", "") + "_" + native("sysinfo", "cpu_name", "");
 hwid = btoa(hwid.trim()); // Safe Base64 encoding
 
 // 3. Request license authentication from your Server:
-var verifyApi = "${targetUrl}?username=" + encodeURIComponent(username) + "&password=" + encodeURIComponent(password) + "&hwid=" + encodeURIComponent(hwid);
+var verifyApi = "${targetUrl}?username=" + encodeURIComponent(username) + "&password=" + encodeURIComponent(password) + "&hwid=" + encodeURIComponent(hwid) + "&app=" + encodeURIComponent(appName);
 
 // 4. Send HTTP verification request:
 var response = http_client_get2(verifyApi, { method: "GET" });
@@ -373,7 +396,7 @@ if (result.status !== "success") {
 
 log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days left: " + result.daysRemaining + ")");
 `;
-  }, [hostUrl]);
+  }, [hostUrl, snippetApp]);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -894,6 +917,29 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
               </div>
             </div>
 
+            {/* App Filter */}
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "20px", alignItems: "center" }}>
+              <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase" }}>
+                App:
+              </span>
+              {["ALL", ...appList].map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAppFilter(a)}
+                  className="btn-neon"
+                  style={{
+                    padding: "5px 12px",
+                    fontSize: "0.76rem",
+                    background: appFilter === a ? "rgba(157,78,221,0.2)" : "rgba(255,255,255,0.04)",
+                    border: appFilter === a ? "1px solid var(--accent-purple)" : "1px solid var(--border-glass)",
+                    color: appFilter === a ? "#d8b4fe" : "var(--text-muted)",
+                  }}
+                >
+                  {a === "ALL" ? "All Apps" : a}
+                </button>
+              ))}
+            </div>
+
             {/* Table */}
             <div className="table-container">
               <table className="glass-table">
@@ -931,6 +977,21 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                             <div className="font-mono" style={{ fontSize: "0.8rem", color: "var(--accent-cyan)" }}>
                               @{u.username}
                             </div>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                marginTop: "4px",
+                                fontSize: "0.68rem",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: "20px",
+                                background: "rgba(79,172,254,0.14)",
+                                border: "1px solid rgba(79,172,254,0.35)",
+                                color: "#7dc4ff",
+                              }}
+                            >
+                              {u.appName ? `📦 ${u.appName}` : "🌐 All Apps"}
+                            </span>
                           </div>
                         </td>
 
@@ -1375,6 +1436,35 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
             )}
 
             <form onSubmit={handleCreateLicense} style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+              {/* App Name */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    marginBottom: "6px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  App Name (Which software is this license for?)
+                </label>
+                <input
+                  type="text"
+                  className="input-glass"
+                  list="appNameList"
+                  placeholder="e.g. InstaBot, YoutubeTool (leave blank = works for all apps)"
+                  value={newAppName}
+                  onChange={(e) => setNewAppName(e.target.value)}
+                />
+                <datalist id="appNameList">
+                  {appList.map((a) => (
+                    <option key={a} value={a} />
+                  ))}
+                </datalist>
+              </div>
+
               {/* Client Name */}
               <div>
                 <label

@@ -4,7 +4,7 @@ import {
   createUser,
   updateUser,
   deleteUser,
-  getUserByUsername,
+  findExactUser,
 } from "@/lib/db";
 
 // Helper to verify admin auth header or cookie
@@ -55,7 +55,7 @@ export async function POST(req) {
 
   try {
     const body = await req.json();
-    const { username, password, clientName, expiresAt, allowMultiDevice } = body;
+    const { username, password, clientName, appName, expiresAt, allowMultiDevice } = body;
 
     if (!username || !password) {
       return NextResponse.json(
@@ -64,10 +64,10 @@ export async function POST(req) {
       );
     }
 
-    const existing = await getUserByUsername(username);
+    const existing = await findExactUser(username, appName);
     if (existing) {
       return NextResponse.json(
-        { status: "error", message: "A license with this username already exists." },
+        { status: "error", message: "A license with this username already exists for this app." },
         { status: 409 }
       );
     }
@@ -76,6 +76,7 @@ export async function POST(req) {
       username,
       password,
       clientName: clientName || username,
+      appName: appName || "",
       expiresAt: expiresAt || "",
       allowMultiDevice: Boolean(allowMultiDevice),
       isActive: true,

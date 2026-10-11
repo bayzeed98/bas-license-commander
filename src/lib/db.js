@@ -109,25 +109,42 @@ export async function getUserById(id) {
   return memoryUsers.find((u) => u.id === id) || null;
 }
 
-export async function getUserByUsername(username) {
+const normApp = (a) => (a || "").trim().toLowerCase();
+
+// Returns all licenses sharing a username (they may belong to different apps)
+export async function getUsersByUsername(username) {
   if (isFirebaseConfigured && db) {
     try {
-      const q = query(
-        collection(db, "users"),
-        where("username", "==", username),
-        limit(1)
-      );
+      const q = query(collection(db, "users"), where("username", "==", username));
       const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        const docSnap = snapshot.docs[0];
-        return { id: docSnap.id, ...docSnap.data() };
-      }
-      return null;
+      const list = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      return list;
     } catch (e) {
       console.error("Firestore error:", e);
     }
   }
-  return memoryUsers.find((u) => u.username.toLowerCase() === username.toLowerCase()) || null;
+  return memoryUsers.filter((u) => u.username.toLowerCase() === username.toLowerCase());
+}
+
+// Finds the license for a username within a specific app.
+// A license with an empty appName is a legacy/universal license valid for any app.
+export async function getUserByUsername(username, appName) {
+  const list = await getUsersByUsername(username);
+  const target = normApp(appName);
+  return (
+    list.find((u) => normApp(u.appName) === target && target !== "") ||
+    list.find((u) => normApp(u.appName) === "") ||
+    null
+  );
+}
+
+// Strict check used when creating licenses (same username + same app only)
+export async function findExactUser(username, appName) {
+  const list = await getUsersByUsername(username);
+  return list.find((u) => normApp(u.appName) === normApp(appName)) || null;
 }
 
 export async function createUser(userData) {
@@ -135,6 +152,7 @@ export async function createUser(userData) {
     username: userData.username.trim(),
     password: userData.password.trim(),
     clientName: userData.clientName?.trim() || "Client",
+    appName: userData.appName?.trim() || "",
     hwid: userData.hwid || "",
     expiresAt: userData.expiresAt || "",
     isActive: userData.isActive !== false,
@@ -193,9 +211,10 @@ export async function deleteUser(id) {
   return memoryUsers.length < initialLen;
 }
 
-export async function logVerification({ username, hwid, ip, status, message }) {
+export async function logVerification({ username, hwid, ip, status, message, appName }) {
   const logEntry = {
     username: username || "unknown",
+    appName: appName || "",
     hwid: hwid || "unknown",
     ip: ip || "unknown",
     status,

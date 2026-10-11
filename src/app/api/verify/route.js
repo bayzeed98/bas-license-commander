@@ -31,13 +31,15 @@ async function handleVerification(req, data) {
     );
   }
 
-  const user = await getUserByUsername(username);
+  const appName = data.app?.trim() || "";
+  const user = await getUserByUsername(username, appName);
 
   // Check username and password
   if (!user || user.password !== password) {
     await logVerification({
       username,
       hwid,
+      appName,
       ip,
       status: "REJECTED",
       message: "Invalid username or password",
@@ -58,6 +60,7 @@ async function handleVerification(req, data) {
     await logVerification({
       username,
       hwid,
+      appName,
       ip,
       status: "BLOCKED",
       message: "License suspended by administrator",
@@ -80,6 +83,7 @@ async function handleVerification(req, data) {
       await logVerification({
         username,
         hwid,
+        appName,
         ip,
         status: "EXPIRED",
         message: "Subscription expired on " + user.expiresAt,
@@ -110,6 +114,7 @@ async function handleVerification(req, data) {
       await logVerification({
         username,
         hwid,
+        appName,
         ip,
         status: "HWID_MISMATCH",
         message: `Attempted login from unauthorized HWID. Bound: ${user.hwid.slice(0, 10)}...`,
@@ -144,6 +149,7 @@ async function handleVerification(req, data) {
   await logVerification({
     username,
     hwid,
+    appName,
     ip,
     status: "SUCCESS",
     message: "Authorized login",
@@ -154,6 +160,7 @@ async function handleVerification(req, data) {
     message: "License verified successfully.",
     user: user.username,
     clientName: user.clientName,
+    app: user.appName || appName || "",
     expiresAt: user.expiresAt || "Lifetime",
     daysRemaining: daysRemaining ?? "Lifetime",
     timestamp: new Date().toISOString(),
@@ -167,6 +174,7 @@ export async function GET(req) {
     username: searchParams.get("username"),
     password: searchParams.get("password"),
     hwid: searchParams.get("hwid"),
+    app: searchParams.get("app"),
   };
   return handleVerification(req, data);
 }
