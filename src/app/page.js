@@ -27,13 +27,27 @@ import {
   Zap,
   Power,
   RotateCcw,
+  Settings,
 } from "lucide-react";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [adminUsername, setAdminUsername] = useState("admin");
   const [adminPassword, setAdminPassword] = useState("");
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [currentAdminUser, setCurrentAdminUser] = useState("admin");
   const [authError, setAuthError] = useState("");
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  // Settings State
+  const [settingsCurrentPassword, setSettingsCurrentPassword] = useState("");
+  const [settingsNewUsername, setSettingsNewUsername] = useState("admin");
+  const [settingsNewPassword, setSettingsNewPassword] = useState("");
+  const [settingsConfirmPassword, setSettingsConfirmPassword] = useState("");
+  const [showSettingsCurrentPass, setShowSettingsCurrentPass] = useState(false);
+  const [showSettingsNewPass, setShowSettingsNewPass] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
 
   // Dashboard Data State
   const [licenses, setLicenses] = useState([]);
@@ -76,20 +90,47 @@ export default function Home() {
       setHostUrl(window.location.origin);
       // Check existing token
       const token = localStorage.getItem("bas_admin_token");
+      const savedUser = localStorage.getItem("bas_admin_username") || "admin";
+      setCurrentAdminUser(savedUser);
+      setSettingsNewUsername(savedUser);
+      setAdminUsername(savedUser);
       if (token) {
         setIsAuthenticated(true);
         fetchLicenses(token);
         fetchLogs(token);
         fetchApps(token);
+        fetchAdminProfile(token);
       } else {
         setIsLoading(false);
       }
     }
   }, []);
 
+  const fetchAdminProfile = async (tokenOverride) => {
+    const token = tokenOverride || localStorage.getItem("bas_admin_token");
+    if (!token) return;
+    try {
+      const res = await fetch("/api/admin/settings", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.username) {
+        setCurrentAdminUser(data.username);
+        setSettingsNewUsername(data.username);
+        setAdminUsername(data.username);
+        localStorage.setItem("bas_admin_username", data.username);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!adminPassword.trim()) return;
+    if (!adminUsername.trim() || !adminPassword.trim()) {
+      setAuthError("Username and password are required.");
+      return;
+    }
     setIsAuthenticating(true);
     setAuthError("");
 
@@ -97,19 +138,27 @@ export default function Home() {
       const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: adminPassword }),
+        body: JSON.stringify({
+          username: adminUsername.trim(),
+          password: adminPassword.trim(),
+        }),
       });
       const data = await res.json();
 
       if (res.ok && data.status === "success") {
         localStorage.setItem("bas_admin_token", data.token);
+        if (data.username) {
+          localStorage.setItem("bas_admin_username", data.username);
+          setCurrentAdminUser(data.username);
+          setSettingsNewUsername(data.username);
+        }
         setIsAuthenticated(true);
         fetchLicenses(data.token);
         fetchLogs(data.token);
         fetchApps(data.token);
-        showToast("Authenticated as Administrator");
+        showToast(`Welcome back, @${data.username || "admin"}!`);
       } else {
-        setAuthError(data.message || "Invalid administrator password");
+        setAuthError(data.message || "Invalid administrator credentials");
       }
     } catch (err) {
       setAuthError("Failed to connect to authentication server");
@@ -122,6 +171,68 @@ export default function Home() {
     localStorage.removeItem("bas_admin_token");
     setIsAuthenticated(false);
     setAdminPassword("");
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setSettingsError("");
+
+    if (!settingsCurrentPassword) {
+      setSettingsError("Current password is required to make security changes.");
+      return;
+    }
+    if (!settingsNewUsername.trim()) {
+      setSettingsError("New admin username cannot be empty.");
+      return;
+    }
+    if (!settingsNewPassword) {
+      setSettingsError("New password cannot be empty.");
+      return;
+    }
+    if (settingsNewPassword !== settingsConfirmPassword) {
+      setSettingsError("New password and confirm password do not match.");
+      return;
+    }
+
+    setIsSavingSettings(true);
+    const token = localStorage.getItem("bas_admin_token");
+
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: settingsCurrentPassword,
+          newUsername: settingsNewUsername.trim(),
+          newPassword: settingsNewPassword,
+        }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.status === "success") {
+        if (data.token) {
+          localStorage.setItem("bas_admin_token", data.token);
+        }
+        if (data.username) {
+          localStorage.setItem("bas_admin_username", data.username);
+          setCurrentAdminUser(data.username);
+          setAdminUsername(data.username);
+        }
+        setSettingsCurrentPassword("");
+        setSettingsNewPassword("");
+        setSettingsConfirmPassword("");
+        showToast("Admin credentials updated and saved to Google Cloud!");
+      } else {
+        setSettingsError(data.message || "Failed to update settings");
+      }
+    } catch (err) {
+      setSettingsError("Network error while updating settings");
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const fetchLicenses = async (tokenOverride) => {
@@ -575,6 +686,7 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
           )}
 
           <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+            {/* Username */}
             <div style={{ textAlign: "left" }}>
               <label
                 style={{
@@ -587,23 +699,74 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                   marginBottom: "8px",
                 }}
               >
-                Master Administrator Password
+                Administrator Username
               </label>
               <div style={{ position: "relative" }}>
                 <input
-                  type="password"
+                  type="text"
                   className="input-glass"
-                  placeholder="Enter admin password (default: admin1234)"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
+                  placeholder="Enter admin username (default: admin)"
+                  value={adminUsername}
+                  onChange={(e) => setAdminUsername(e.target.value)}
                   style={{ paddingLeft: "42px" }}
                   autoFocus
+                  required
                 />
-                <Key
+                <Users
                   size={18}
                   color="#94a3b8"
                   style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
                 />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div style={{ textAlign: "left" }}>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: "0.78rem",
+                  fontWeight: 700,
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: "8px",
+                }}
+              >
+                Administrator Password
+              </label>
+              <div style={{ position: "relative" }}>
+                <input
+                  type={showAdminPassword ? "text" : "password"}
+                  className="input-glass"
+                  placeholder="Enter password (default: admin1234)"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  style={{ paddingLeft: "42px", paddingRight: "44px" }}
+                  required
+                />
+                <Lock
+                  size={18}
+                  color="#94a3b8"
+                  style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPassword(!showAdminPassword)}
+                  style={{
+                    position: "absolute",
+                    right: "14px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    color: "var(--text-dim)",
+                    cursor: "pointer",
+                  }}
+                  title="Toggle password visibility"
+                >
+                  {showAdminPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 
@@ -625,6 +788,9 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                 </>
               )}
             </button>
+            <div style={{ fontSize: "0.78rem", color: "var(--text-dim)", textAlign: "center" }}>
+              Default: <b>admin</b> / <b>admin1234</b> (Changeable in Settings)
+            </div>
           </form>
 
           <div
@@ -733,6 +899,16 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
 
           {/* Header Action Buttons */}
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button
+              onClick={() => setActiveTab("settings")}
+              className={`btn-neon ${activeTab === "settings" ? "btn-primary" : "btn-secondary"}`}
+              style={{ padding: "8px 14px", fontSize: "0.85rem" }}
+              title="Admin Credentials & Settings"
+            >
+              <Settings size={16} color="var(--accent-cyan)" />
+              <span>@{currentAdminUser}</span>
+            </button>
+
             <button
               onClick={() => setActiveTab("bas")}
               className="btn-neon btn-secondary"
@@ -986,6 +1162,15 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
           >
             <Terminal size={16} />
             <span>BAS Integration Guide</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("settings")}
+            className={`btn-neon ${activeTab === "settings" ? "btn-primary" : "btn-secondary"}`}
+            style={{ padding: "8px 20px", fontSize: "0.9rem" }}
+          >
+            <Settings size={16} />
+            <span>Settings</span>
           </button>
         </div>
 
@@ -1613,6 +1798,297 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB: ADMIN SETTINGS & SECURITY */}
+        {/* ========================================================= */}
+        {activeTab === "settings" && (
+          <div style={{ maxWidth: "760px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+            {/* Overview / Info Card */}
+            <div className="glass-card" style={{ padding: "32px", position: "relative", overflow: "hidden" }}>
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-40px",
+                  right: "-40px",
+                  width: "160px",
+                  height: "160px",
+                  background: "radial-gradient(circle, rgba(0,242,254,0.15) 0%, transparent 70%)",
+                  borderRadius: "50%",
+                  pointerEvents: "none",
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "20px" }}>
+                <div
+                  style={{
+                    width: "48px",
+                    height: "48px",
+                    borderRadius: "14px",
+                    background: "rgba(0, 242, 254, 0.12)",
+                    border: "1px solid rgba(0, 242, 254, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Lock size={24} color="#00f2fe" />
+                </div>
+                <div>
+                  <h2 style={{ fontSize: "1.3rem", fontWeight: 800 }}>Admin Security & Credentials</h2>
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                    Update your dashboard login username and password. Saved directly to Google Cloud Firestore.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "rgba(15, 23, 42, 0.6)",
+                  border: "1px solid var(--border-glass)",
+                  borderRadius: "12px",
+                  padding: "16px 20px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", textTransform: "uppercase", fontWeight: 700 }}>
+                    Active Administrator
+                  </span>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--accent-cyan)", marginTop: "2px" }}>
+                    @{currentAdminUser}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span className="badge-neon badge-active" style={{ fontSize: "0.75rem", padding: "4px 10px" }}>
+                    <span className="pulse-dot"></span> Cloud-Synced
+                  </span>
+                </div>
+              </div>
+
+              {/* Settings Form */}
+              <form onSubmit={handleSaveSettings} style={{ marginTop: "28px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                {settingsError && (
+                  <div
+                    style={{
+                      background: "rgba(239, 68, 68, 0.12)",
+                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                      borderRadius: "12px",
+                      padding: "14px 18px",
+                      color: "#fca5a5",
+                      fontSize: "0.85rem",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                    }}
+                  >
+                    <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                    <span>{settingsError}</span>
+                  </div>
+                )}
+
+                {/* New Username */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    New Admin Username
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="text"
+                      className="input-glass"
+                      placeholder="e.g. admin or myname"
+                      value={settingsNewUsername}
+                      onChange={(e) => setSettingsNewUsername(e.target.value)}
+                      style={{ paddingLeft: "42px" }}
+                      required
+                    />
+                    <Users
+                      size={18}
+                      color="#94a3b8"
+                      style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
+                    />
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginTop: "6px", display: "block" }}>
+                    Used to sign in to this control panel.
+                  </span>
+                </div>
+
+                <div style={{ height: "1px", background: "var(--border-glass)", margin: "4px 0" }} />
+
+                {/* Current Password */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      color: "#fbbf24",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Current Password (Verification Required)
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type={showSettingsCurrentPass ? "text" : "password"}
+                      className="input-glass"
+                      placeholder="Enter current password to authorize change"
+                      value={settingsCurrentPassword}
+                      onChange={(e) => setSettingsCurrentPassword(e.target.value)}
+                      style={{ paddingLeft: "42px", paddingRight: "44px" }}
+                      required
+                    />
+                    <Lock
+                      size={18}
+                      color="#fbbf24"
+                      style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsCurrentPass(!showSettingsCurrentPass)}
+                      style={{
+                        position: "absolute",
+                        right: "14px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "none",
+                        border: "none",
+                        color: "var(--text-dim)",
+                        cursor: "pointer",
+                      }}
+                      title="Toggle visibility"
+                    >
+                      {showSettingsCurrentPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", marginTop: "6px", display: "block" }}>
+                    Default initial password is <b>admin1234</b> unless already changed.
+                  </span>
+                </div>
+
+                {/* New Password */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    New Password
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type={showSettingsNewPass ? "text" : "password"}
+                      className="input-glass"
+                      placeholder="Enter new password (min 6 characters)"
+                      value={settingsNewPassword}
+                      onChange={(e) => setSettingsNewPassword(e.target.value)}
+                      style={{ paddingLeft: "42px", paddingRight: "44px" }}
+                      required
+                      minLength={6}
+                    />
+                    <Key
+                      size={18}
+                      color="#94a3b8"
+                      style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsNewPass(!showSettingsNewPass)}
+                      style={{
+                        position: "absolute",
+                        right: "14px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "none",
+                        border: "none",
+                        color: "var(--text-dim)",
+                        cursor: "pointer",
+                      }}
+                      title="Toggle visibility"
+                    >
+                      {showSettingsNewPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm New Password */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Confirm New Password
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="password"
+                      className="input-glass"
+                      placeholder="Re-type new password"
+                      value={settingsConfirmPassword}
+                      onChange={(e) => setSettingsConfirmPassword(e.target.value)}
+                      style={{ paddingLeft: "42px" }}
+                      required
+                    />
+                    <CheckCircle2
+                      size={18}
+                      color="#94a3b8"
+                      style={{ position: "absolute", left: "14px", top: "50%", transform: "translateY(-50%)" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+                  <button
+                    type="submit"
+                    className="btn-neon btn-primary"
+                    disabled={isSavingSettings}
+                    style={{ padding: "12px 28px", fontSize: "0.95rem" }}
+                  >
+                    {isSavingSettings ? (
+                      <>
+                        <RefreshCw size={18} className="animate-spin" />
+                        <span>Saving to Cloud...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={18} />
+                        <span>Update & Save Credentials</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

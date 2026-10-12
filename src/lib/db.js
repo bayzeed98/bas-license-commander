@@ -18,6 +18,60 @@ import {
 // Local fallback store (used only if Firebase credentials are not yet configured)
 let memoryUsers = [];
 let memoryLogs = [];
+let memoryAdmin = null;
+
+export async function getAdminCredentials() {
+  const defaultUsername = process.env.ADMIN_USERNAME || "admin";
+  const defaultPassword = process.env.ADMIN_PASSWORD || "admin1234";
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const docRef = doc(db, "settings", "admin_auth");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        return {
+          username: data.username || defaultUsername,
+          password: data.password || defaultPassword,
+        };
+      }
+    } catch (e) {
+      console.error("Firestore getAdminCredentials error:", e);
+    }
+  }
+
+  return {
+    username: memoryAdmin?.username || defaultUsername,
+    password: memoryAdmin?.password || defaultPassword,
+  };
+}
+
+export async function updateAdminCredentials(newUsername, newPassword) {
+  const cleanUser = (newUsername || "").trim();
+  const cleanPass = (newPassword || "").trim();
+
+  if (!cleanUser || !cleanPass) {
+    throw new Error("Username and password cannot be empty");
+  }
+
+  if (isFirebaseConfigured && db) {
+    try {
+      const docRef = doc(db, "settings", "admin_auth");
+      await setDoc(docRef, {
+        username: cleanUser,
+        password: cleanPass,
+        updatedAt: new Date().toISOString(),
+      });
+      return { username: cleanUser };
+    } catch (e) {
+      console.error("Firestore updateAdminCredentials error:", e);
+      throw new Error(`Failed to update credentials in Firestore: ${e.message}`);
+    }
+  }
+
+  memoryAdmin = { username: cleanUser, password: cleanPass };
+  return { username: cleanUser };
+}
 
 export async function getAllUsers() {
   if (isFirebaseConfigured && db) {
