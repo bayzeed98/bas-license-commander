@@ -556,7 +556,10 @@ export default function Home() {
     return { total, active, locked, expired };
   }, [licenses]);
 
-  // BAS Code Snippet
+  // Sub-tab for BAS integration guide ("bas" = BAS script, "nodejs" = Node.js script)
+  const [basCodeTab, setBasCodeTab] = useState("bas");
+
+  // BAS Code Snippet (uses BAS built-in functions)
   const buildSnippet = (appForSnippet) => {
     const targetUrl = hostUrl ? `${hostUrl}/api/verify` : "https://YOUR-APP.vercel.app/api/verify";
     return `// ==========================================
@@ -589,7 +592,83 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
 `;
   };
 
-  const basSnippet = useMemo(() => buildSnippet(snippetApp), [hostUrl, snippetApp]);
+  // Node.js Code Snippet (uses standard Node.js https module — for BAS "Execute code" with Node.js engine)
+  const buildNodeSnippet = (appForSnippet) => {
+    const targetUrl = hostUrl ? `${hostUrl}/api/verify` : "https://YOUR-APP.vercel.app/api/verify";
+    return `// ============================================================
+// BAS CYBER-AUTH LICENSE VERIFICATION — Node.js Version
+// Use this inside a BAS "Execute code" block (Node.js engine)
+// ============================================================
+
+const https = require('https');
+const { execSync } = require('child_process');
+
+// 1. Provide your license credentials:
+const username = '%LicenseUser%';   // <-- Replace with your BAS variable or fixed value
+const password = '%LicensePass%';   // <-- Replace with your BAS variable or fixed value
+
+// App name (must EXACTLY match the app name used when creating the license in the panel):
+const appName = '${appForSnippet}';
+
+// 2. Generate unique Hardware ID (HWID) from this PC:
+function getHwid() {
+  try {
+    const out = execSync(
+      'reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+      { encoding: 'utf8', timeout: 3000 }
+    );
+    const match = out.match(/MachineGuid\s+REG_SZ\s+([a-zA-Z0-9-]+)/i);
+    if (match) return Buffer.from(match[1].trim()).toString('base64');
+  } catch (_) {}
+  // Fallback
+  const os = require('os');
+  return Buffer.from(os.hostname()).toString('base64');
+}
+const hwid = getHwid();
+
+// 3. Build the verification URL:
+const verifyUrl = '${targetUrl}'
+  + '?username=' + encodeURIComponent(username)
+  + '&password=' + encodeURIComponent(password)
+  + '&hwid='     + encodeURIComponent(hwid)
+  + '&app='      + encodeURIComponent(appName);
+
+// 4. Send HTTPS GET request to the license server:
+function checkLicense(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error('Invalid server response')); }
+      });
+    }).on('error', reject);
+  });
+}
+
+// 5. Run verification (top-level await supported in Node 18+, else wrap in async IIFE):
+(async () => {
+  try {
+    const result = await checkLicense(verifyUrl);
+
+    if (result.status !== 'success') {
+      throw new Error('ACCESS DENIED: ' + (result.message || 'Invalid License'));
+    }
+
+    console.log('>>> LICENSE VERIFIED! Client:', result.clientName, '| Days left:', result.daysRemaining);
+    // Your bot logic continues here...
+
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1); // Stop BAS script execution
+  }
+})();
+`;
+  };
+
+  const basSnippet  = useMemo(() => buildSnippet(snippetApp),     [hostUrl, snippetApp]);
+  const nodeSnippet = useMemo(() => buildNodeSnippet(snippetApp),  [hostUrl, snippetApp]);
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -1665,31 +1744,56 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
             {/* Left: Code Snippet */}
             <div className="glass-card" style={{ padding: "28px" }}>
+              {/* Sub-tab toggle: BAS vs Node.js */}
               <div
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
                   alignItems: "center",
-                  marginBottom: "16px",
+                  gap: "8px",
+                  marginBottom: "20px",
+                  borderBottom: "1px solid var(--border-glass)",
+                  paddingBottom: "14px",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <Terminal size={20} color="var(--accent-cyan)" />
-                  <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>BAS Verification Code</h3>
-                </div>
                 <button
-                  onClick={() => copyToClipboard(basSnippet)}
-                  className="btn-neon btn-primary"
-                  style={{ padding: "8px 16px", fontSize: "0.82rem" }}
+                  onClick={() => setBasCodeTab("bas")}
+                  className={`btn-neon ${basCodeTab === "bas" ? "btn-primary" : "btn-secondary"}`}
+                  style={{ padding: "6px 16px", fontSize: "0.82rem" }}
                 >
-                  {copiedCode ? <Check size={16} /> : <Copy size={16} />}
-                  <span>{copiedCode ? "Copied!" : "Copy Code"}</span>
+                  <Terminal size={14} />
+                  <span>BAS Built-in</span>
                 </button>
+                <button
+                  onClick={() => setBasCodeTab("nodejs")}
+                  className={`btn-neon ${basCodeTab === "nodejs" ? "btn-primary" : "btn-secondary"}`}
+                  style={{ padding: "6px 16px", fontSize: "0.82rem" }}
+                >
+                  <Zap size={14} color={basCodeTab === "nodejs" ? undefined : "var(--accent-emerald)"} />
+                  <span>Node.js</span>
+                </button>
+
+                <div style={{ marginLeft: "auto" }}>
+                  <button
+                    onClick={() => copyToClipboard(basCodeTab === "bas" ? basSnippet : nodeSnippet)}
+                    className="btn-neon btn-primary"
+                    style={{ padding: "6px 14px", fontSize: "0.82rem" }}
+                  >
+                    {copiedCode ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedCode ? "Copied!" : "Copy Code"}</span>
+                  </button>
+                </div>
               </div>
 
-              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "16px" }}>
-                Copy and paste this script directly into an <code>Execute code</code> block in Browser Automation Studio:
-              </p>
+              {basCodeTab === "bas" && (
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "14px" }}>
+                  BAS built-in functions — paste directly into an <code>Execute code</code> block:
+                </p>
+              )}
+              {basCodeTab === "nodejs" && (
+                <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "14px" }}>
+                  Node.js script — use in a BAS <code>Execute code</code> block set to <b>Node.js</b> engine:
+                </p>
+              )}
 
               <pre
                 style={{
@@ -1697,106 +1801,146 @@ log(">>> LICENSE VALIDATED SUCCESSFULLY! Client: " + result.clientName + " (Days
                   border: "1px solid var(--border-glass)",
                   padding: "18px",
                   borderRadius: "14px",
-                  fontSize: "0.8rem",
+                  fontSize: "0.78rem",
                   color: "#e2e8f0",
                   overflowX: "auto",
                   lineHeight: "1.6",
+                  maxHeight: "460px",
+                  overflowY: "auto",
                 }}
               >
-                {basSnippet}
+                {basCodeTab === "bas" ? basSnippet : nodeSnippet}
               </pre>
             </div>
 
             {/* Right: Step-by-Step Instructions */}
             <div className="glass-card" style={{ padding: "28px" }}>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 700, marginBottom: "20px" }}>
-                How to Connect with Browser Automation Studio
+                {basCodeTab === "nodejs" ? "Node.js Script — How to Use" : "BAS Built-in — How to Connect"}
               </h3>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* Step 1 */}
                 <div style={{ display: "flex", gap: "14px" }}>
                   <div
                     style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "50%",
-                      background: "rgba(0, 242, 254, 0.2)",
-                      border: "1px solid var(--accent-cyan)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 800,
-                      color: "var(--accent-cyan)",
-                      flexShrink: 0,
+                      width: "32px", height: "32px", borderRadius: "50%",
+                      background: "rgba(0, 242, 254, 0.2)", border: "1px solid var(--accent-cyan)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontWeight: 800, color: "var(--accent-cyan)", flexShrink: 0,
                     }}
-                  >
-                    1
-                  </div>
+                  >1</div>
                   <div>
-                    <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Add BAS Input Resources</h4>
-                    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
-                      Open your BAS project, go to <b>Resources</b>, and create two new resources named:
-                      <br />
-                      <code>LicenseUser</code> (Fixed String / Line by user)
-                      <br />
-                      <code>LicensePass</code> (Password String)
-                    </p>
+                    {basCodeTab === "bas" ? (
+                      <>
+                        <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Add BAS Input Resources</h4>
+                        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                          In your BAS project, go to <b>Resources</b> and create two inputs:<br />
+                          <code>LicenseUser</code> (Fixed String / Line by user)<br />
+                          <code>LicensePass</code> (Password String)
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Fill in Username & Password</h4>
+                        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                          In the copied code, replace <code>%LicenseUser%</code> and <code>%LicensePass%</code> with the
+                          exact <b>username</b> and <b>password</b> you entered when creating the license in this panel.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
 
+                {/* Step 2 */}
                 <div style={{ display: "flex", gap: "14px" }}>
                   <div
                     style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "50%",
-                      background: "rgba(157, 78, 221, 0.2)",
-                      border: "1px solid var(--accent-purple)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 800,
-                      color: "var(--accent-purple)",
-                      flexShrink: 0,
+                      width: "32px", height: "32px", borderRadius: "50%",
+                      background: "rgba(157, 78, 221, 0.2)", border: "1px solid var(--accent-purple)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontWeight: 800, color: "var(--accent-purple)", flexShrink: 0,
                     }}
-                  >
-                    2
-                  </div>
+                  >2</div>
                   <div>
-                    <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Insert "Execute code" Block</h4>
-                    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
-                      At the very beginning of your BAS script (before browser launch or profile load), add an{" "}
-                      <b>Execute code</b> action and paste the copied snippet.
-                    </p>
+                    {basCodeTab === "bas" ? (
+                      <>
+                        <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Insert "Execute code" Block</h4>
+                        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                          At the very beginning of your BAS script (before browser launch), add an <b>Execute code</b> action
+                          and paste the copied snippet. No extra setup needed.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Add "Execute code" Block → Select Node.js</h4>
+                        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                          Add an <b>Execute code</b> block at the very start of your BAS script. In the block settings,
+                          set the engine to <b>Node.js</b> (not the default BAS JS engine). Then paste the copied code.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
 
+                {/* Step 3 — Node.js only extra info */}
+                {basCodeTab === "nodejs" && (
+                  <div style={{ display: "flex", gap: "14px" }}>
+                    <div
+                      style={{
+                        width: "32px", height: "32px", borderRadius: "50%",
+                        background: "rgba(251, 191, 36, 0.15)", border: "1px solid #fbbf24",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontWeight: 800, color: "#fbbf24", flexShrink: 0,
+                      }}
+                    >3</div>
+                    <div>
+                      <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>App Name Must Match Exactly</h4>
+                      <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
+                        The <code>appName</code> in the script (currently <b>"{snippetApp}"</b>) must <b>exactly match</b> the
+                        App Name set on that user's license in this panel. Case-sensitive!
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Step 3 (BAS) / Step 4 (Node.js) — HWID auto-bind */}
                 <div style={{ display: "flex", gap: "14px" }}>
                   <div
                     style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "50%",
-                      background: "rgba(16, 185, 129, 0.2)",
-                      border: "1px solid var(--accent-emerald)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 800,
-                      color: "var(--accent-emerald)",
-                      flexShrink: 0,
+                      width: "32px", height: "32px", borderRadius: "50%",
+                      background: "rgba(16, 185, 129, 0.2)", border: "1px solid var(--accent-emerald)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontWeight: 800, color: "var(--accent-emerald)", flexShrink: 0,
                     }}
-                  >
-                    3
-                  </div>
+                  >{basCodeTab === "nodejs" ? "4" : "3"}</div>
                   <div>
                     <h4 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Automatic PC Binding & Kill Switch</h4>
                     <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "4px" }}>
-                      When the user runs the bot, their PC Hardware ID will automatically bind to your dashboard.
-                      You can suspend their access anytime with a single click on the Power icon!
+                      On first run, the user's PC Hardware ID binds automatically to their license.
+                      You can suspend access anytime from the Licenses tab with a single click!
                     </p>
                   </div>
                 </div>
+
+                {/* Node.js tip box */}
+                {basCodeTab === "nodejs" && (
+                  <div
+                    style={{
+                      background: "rgba(0, 242, 254, 0.07)",
+                      border: "1px solid rgba(0, 242, 254, 0.25)",
+                      borderRadius: "12px",
+                      padding: "14px 16px",
+                      fontSize: "0.82rem",
+                      color: "var(--text-muted)",
+                      marginTop: "4px",
+                    }}
+                  >
+                    <b style={{ color: "var(--accent-cyan)" }}>💡 Node.js Tip:</b> The script uses the Windows Registry
+                    (<code>MachineGuid</code>) to generate a unique, stable Hardware ID per PC — no extra libraries needed,
+                    only built-in Node.js modules (<code>https</code>, <code>child_process</code>, <code>os</code>).
+                  </div>
+                )}
               </div>
             </div>
           </div>
