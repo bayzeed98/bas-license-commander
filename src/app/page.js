@@ -1358,6 +1358,14 @@ function checkLicense(url) {
                           <Terminal size={14} />
                           <span>Copy BAS Code</span>
                         </button>
+                        <button
+                          onClick={() => copyToClipboard(buildNodeSnippet(name))}
+                          className="btn-neon btn-secondary"
+                          style={{ padding: "7px 14px", fontSize: "0.78rem" }}
+                        >
+                          <Terminal size={14} />
+                          <span>Copy Node.js Code</span>
+                        </button>
                       </div>
                     </div>
                   );
